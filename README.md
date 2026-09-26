@@ -1,7 +1,3 @@
-<p align="center">
-  <img src="docs/assets/header.svg" alt="pg-jev — ask your Postgres tables questions in plain language" width="100%">
-</p>
-
 # jev — ask your Postgres tables questions in plain language
 
 [![CI](https://github.com/realZachi/pg-jev/actions/workflows/ci.yml/badge.svg)](https://github.com/realZachi/pg-jev/actions/workflows/ci.yml)
@@ -15,7 +11,7 @@ Write the condition the way you would say it. Postgres does the rest.
 [TypeSafe's Jev](https://docs.typesafe.ai), a System One model that returns calibrated probabilities
 instead of generated text. No index, no embeddings, no vector column.
 
-Website: [pgjev.com](https://pgjev.com)
+Documentation: [pgjev.com/docs](https://pgjev.com/docs)
 
 ```sql
 CREATE EXTENSION jev CASCADE;
@@ -73,23 +69,6 @@ Requirements: PostgreSQL 14–17 with `plpython3u` (package `postgresql-plpython
 included in the EDB and Postgres.app builds), a superuser, and a TypeSafe API key from https://console.typesafe.ai.
 Managed hosts that withhold superuser or `plpython3u` (Supabase, Neon, RDS, …) cannot run it; see
 [Where it runs](https://pgjev.com/docs/getting-started/where-it-runs).
-
-### With an AI agent (easiest)
-
-The repo ships an [agent skill](.agents/skills/pgjev/SKILL.md) on [skills.sh](https://skills.sh). Install it into
-your project and tell Claude Code, Codex, Cursor or any other skill-aware agent to finish the job:
-
-```bash
-npx skills add realZachi/pg-jev
-```
-
-> Install pgjev on this server and set it up.
-
-The agent runs a preflight (PostgreSQL version, `plpython3u`, superuser), `pgxn install jev` or `make install` against the right
-`pg_config`, `CREATE EXTENSION jev CASCADE`, places the API key and runs a smoke test. Afterwards it also knows how
-to write cost-conscious `jev()` queries ("find the tickets where the customer threatens to cancel") and to explain
-what pgjev can do. The docs are readable as Markdown for agents too: append `.md` to any page under
-https://pgjev.com/docs (see [For agents](https://pgjev.com/docs/for-agents)).
 
 ### From PGXN
 
@@ -204,7 +183,15 @@ make installcheck                # pg_regress, tests in test/sql, expected outpu
 
 The regression tests never call the live API. To try the real thing, `SET jev.api_key` and run any query.
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) and [docs/PUBLISHING.md](docs/PUBLISHING.md) for release steps.
+### Releases
+
+1. Update `jev.control`, `META.json`, `CHANGELOG.md` and `jev_version()`; add the new install SQL and an upgrade
+   script from the previous version. Keep older SQL scripts so existing installations can upgrade.
+2. Run `make docker-test PG_MAJOR=N` for PostgreSQL 14–17.
+3. Commit the changes, then run `make dist` to build the PGXN zip from Git HEAD. Validate the bundle with
+   `docker run --rm -v "$PWD":/repo -w /repo pgxn/pgxn-tools pgxn-bundle`.
+4. Tag and push `vX.Y.Z`. The release workflow attaches the zip to a GitHub release and uploads it to PGXN
+   when the `PGXN_USERNAME` and `PGXN_PASSWORD` repository secrets are configured.
 
 ## License
 

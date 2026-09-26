@@ -6,6 +6,10 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Removed
+- Bundled agent skill, standalone contributor and publishing guides, example script, and branding asset.
+  Release instructions now live in README; usage documentation remains at https://pgjev.com/docs.
+
 ## [0.3.0] - 2026-09-26
 
 ### Added

@@ -18,12 +18,6 @@ The docs source lives in the sibling repo `/Users/mahmoudalikhan/dev/pgjev-site`
 to the SQL API, a setting, a default or documented behaviour must be mirrored there **and** in `README.md` here.
 When pointing users at docs, link pgjev.com/docs rather than paraphrasing at length.
 
-`.agents/skills/pgjev/` (symlinked as `.claude/skills/pgjev`) is the **user-facing agent skill** shipped with the
-repo and installable via `npx skills add realZachi/pg-jev`: how to install, configure, query and explain pgjev,
-plus `scripts/check_server.sh`, `scripts/install.sh` and `scripts/smoke_test.sql`. It states defaults, function
-signatures and error messages, so update it together with README and docs when those change. This AGENTS.md is
-for working *on* the extension; the skill is for working *with* it.
-
 ## Commands
 
 ```bash
@@ -97,5 +91,5 @@ Threads must never touch `plpy`; only the main thread does SPI, `plpy.notice` an
   by position.
 - Release: bump `jev.control`, add `sql/jev--X.Y.Z.sql` and `sql/jev--OLD--X.Y.Z.sql`, update `jev_version()`,
   `META.json`, `CHANGELOG.md`, then tag `vX.Y.Z` (the release workflow builds the PGXN zip). Full checklist in
-  `docs/PUBLISHING.md`.
+  `README.md` under Releases.
 - Supported: PostgreSQL 14–17 with `plpython3u`. Only superusers can `CREATE EXTENSION jev`.
