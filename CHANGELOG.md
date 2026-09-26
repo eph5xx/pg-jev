@@ -6,6 +6,23 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-09-26
+
+### Added
+- Lazy semantic views: `create_semantic_predicate`, `create_semantic_view`,
+  `semantic_view_status`, `set_semantic_threshold`, `drop_semantic_view`, and
+  `drop_semantic_predicate`. Named predicates share persistent probabilities across
+  views and sessions; reads evaluate only demanded pending predicates.
+- Transactional input tracking, generation checks, and coordination between concurrent
+  readers. Boolean expressions preserve SQL NULL semantics and short-circuit explicitly.
+- MVP requires ordinary permanent tables with a single nondeferrable integer primary key,
+  explicit input columns, and writable READ COMMITTED transactions. Definitions capture
+  their model and API endpoint at creation; only thresholds are mutable. Recreate a
+  predicate to change its condition, columns or model. Administration requires superuser;
+  readers need SELECT on both view and source. Cold inference is one row at a time.
+- Regression, multi-session, upgrade and backup/restore tests; runnable example in
+  `examples/semantic_views.sql`. No autonomous background worker is introduced.
+
 ## [0.2.0] - 2026-09-18
 
 Measured against the live API on a 2,000-row table (from Europe, ~190 ms RTT to the API): first run

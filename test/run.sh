@@ -21,3 +21,5 @@ if make installcheck; then
 else
   echo "jev: regression tests FAILED"; cat test/regression.diffs 2>/dev/null || true; exit 1
 fi
+python3 test/semantic_concurrency.py
+python3 test/semantic_upgrade.py

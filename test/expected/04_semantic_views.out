@@ -1,0 +1,376 @@
+-- Lazy predicates: all inference uses the deterministic mock.
+\set VERBOSITY terse
+SET jev.api_url = 'http://127.0.0.1:8765/v1/systemone';
+SET jev.api_key = 'test-key';
+SET jev.notices = off;
+CREATE TABLE products (id bigint PRIMARY KEY, review_text text, category text, reviews int);
+INSERT INTO products VALUES (1,'good','green',20), (2,'bad','red',20),
+                           (3,'good','green',5), (4,NULL,'green',NULL);
+SELECT create_semantic_predicate('positive','products','is good',ARRAY['review_text'],0.8) > 0 AS registered;
+ registered 
+------------
+ t
+(1 row)
+
+SELECT create_semantic_predicate('green','products','is green',ARRAY['category']) > 0 AS registered;
+ registered 
+------------
+ t
+(1 row)
+
+SELECT create_semantic_predicate('broken','products','trigger422',ARRAY['review_text']) > 0 AS registered;
+ registered 
+------------
+ t
+(1 row)
+
+SELECT create_semantic_view('popular_positive','products','reviews > 10 AND positive');
+ create_semantic_view 
+----------------------
+ 
+(1 row)
+
+SELECT semantic_view_status('popular_positive');
+               semantic_view_status               
+--------------------------------------------------
+ [{"name": "positive", "ready": 0, "pending": 4}]
+(1 row)
+
+SELECT (jev_stats()->>'requests')::int AS no_registration_inference;
+ no_registration_inference 
+---------------------------
+                         0
+(1 row)
+
+SELECT id FROM popular_positive ORDER BY id;
+ id 
+----
+  1
+(1 row)
+
+SELECT semantic_view_status('popular_positive');
+               semantic_view_status               
+--------------------------------------------------
+ [{"name": "positive", "ready": 2, "pending": 2}]
+(1 row)
+
+SELECT (jev_stats()->>'requests')::int AS only_two_needed;
+ only_two_needed 
+-----------------
+               2
+(1 row)
+
+-- Even NULL AND positive cannot match: the first read skips that inference.
+SELECT create_semantic_view('positive_again','products','positive');
+ create_semantic_view 
+----------------------
+ 
+(1 row)
+
+SELECT id FROM positive_again ORDER BY id;
+ id 
+----
+  1
+  3
+(2 rows)
+
+SELECT (jev_stats()->>'requests')::int AS shared_results;
+ shared_results 
+----------------
+              4
+(1 row)
+
+SELECT create_semantic_view('complex_products','products','(positive AND green) OR reviews > 30');
+ create_semantic_view 
+----------------------
+ 
+(1 row)
+
+SELECT id FROM complex_products ORDER BY id;
+ id 
+----
+  1
+  3
+(2 rows)
+
+SELECT semantic_view_status('complex_products');
+                                     semantic_view_status                                      
+-----------------------------------------------------------------------------------------------
+ [{"name": "green", "ready": 2, "pending": 2}, {"name": "positive", "ready": 4, "pending": 0}]
+(1 row)
+
+-- Changing thresholds is free, across all views.
+SELECT set_semantic_threshold('positive','products',0.95);
+ set_semantic_threshold 
+------------------------
+ 
+(1 row)
+
+SELECT count(*) FROM positive_again;
+ count 
+-------
+     0
+(1 row)
+
+SELECT set_semantic_threshold('positive','products',0.8);
+ set_semantic_threshold 
+------------------------
+ 
+(1 row)
+
+-- Unrelated and no-op updates preserve results; only relevant inputs invalidate.
+UPDATE products SET reviews=21 WHERE id=1;
+UPDATE products SET review_text=review_text;
+SELECT semantic_view_status('complex_products');
+                                     semantic_view_status                                      
+-----------------------------------------------------------------------------------------------
+ [{"name": "green", "ready": 2, "pending": 2}, {"name": "positive", "ready": 4, "pending": 0}]
+(1 row)
+
+UPDATE products SET review_text='good now' WHERE id=2;
+SELECT semantic_view_status('complex_products');
+                                     semantic_view_status                                      
+-----------------------------------------------------------------------------------------------
+ [{"name": "green", "ready": 2, "pending": 2}, {"name": "positive", "ready": 3, "pending": 1}]
+(1 row)
+
+SELECT id FROM complex_products ORDER BY id;
+ id 
+----
+  1
+  3
+(2 rows)
+
+SELECT semantic_view_status('complex_products');
+                                     semantic_view_status                                      
+-----------------------------------------------------------------------------------------------
+ [{"name": "green", "ready": 3, "pending": 1}, {"name": "positive", "ready": 4, "pending": 0}]
+(1 row)
+
+-- OR and AND skip the deliberately failing predicate.
+SELECT create_semantic_view('or_skip','products','reviews IS NOT NULL OR broken');
+ create_semantic_view 
+----------------------
+ 
+(1 row)
+
+SELECT id FROM or_skip WHERE id=1;
+ id 
+----
+  1
+(1 row)
+
+SELECT create_semantic_view('and_skip','products','reviews < 0 AND broken');
+ create_semantic_view 
+----------------------
+ 
+(1 row)
+
+SELECT count(*) FROM and_skip;
+ count 
+-------
+     0
+(1 row)
+
+-- NULL is preserved through NOT; the selected predicate must still be resolved.
+SELECT create_semantic_view('null_logic','products','NOT (reviews > 0 AND positive)');
+ create_semantic_view 
+----------------------
+ 
+(1 row)
+
+SELECT id FROM null_logic ORDER BY id;
+ id 
+----
+  4
+(1 row)
+
+SELECT create_semantic_view('fails','products','broken');
+ create_semantic_view 
+----------------------
+ 
+(1 row)
+
+SELECT * FROM fails;
+ERROR:  plpy.Error: jev: TypeSafe API error 422 {"error": "mock validation failure"}
+SELECT semantic_view_status('fails');
+              semantic_view_status              
+------------------------------------------------
+ [{"name": "broken", "ready": 0, "pending": 4}]
+(1 row)
+
+-- Rollback discards probabilities; a later read really evaluates again.
+INSERT INTO products VALUES (5,'good','red',20);
+BEGIN;
+SELECT id FROM positive_again WHERE id=5;
+ id 
+----
+  5
+(1 row)
+
+ROLLBACK;
+SELECT status FROM jev_semantic.results r JOIN jev_semantic.predicates p ON p.id=r.predicate_id
+WHERE p.name='positive' AND r.row_id=5;
+ status  
+---------
+ pending
+(1 row)
+
+SELECT id FROM positive_again WHERE id=5;
+ id 
+----
+  5
+(1 row)
+
+-- Primary-key changes, deletes and truncate clean up state.
+UPDATE products SET id=50 WHERE id=5;
+SELECT count(*) AS old_key_gone FROM jev_semantic.results WHERE row_id=5;
+ old_key_gone 
+--------------
+            0
+(1 row)
+
+DELETE FROM products WHERE id=50;
+SELECT count(*) AS deleted_key_gone FROM jev_semantic.results WHERE row_id=50;
+ deleted_key_gone 
+------------------
+                0
+(1 row)
+
+-- API key is unnecessary for a warm read, including in a fresh session.
+\connect -reuse-previous=on
+SET jev.api_key = '';
+SELECT id FROM positive_again ORDER BY id;
+ id 
+----
+  1
+  2
+  3
+(3 rows)
+
+-- Unsupported syntax and source changes are rejected transactionally.
+SELECT create_semantic_view('invalid','products','positive; DROP TABLE products');
+ERROR:  plpy.Error: jev: unsupported expression syntax at character 9
+SELECT create_semantic_view('invalid','products','positive OR pg_sleep(1)');
+ERROR:  plpy.Error: jev: unknown predicate or source column: pg_sleep
+SELECT create_semantic_view('invalid','products','missing');
+ERROR:  plpy.Error: jev: unknown predicate or source column: missing
+SELECT create_semantic_predicate('reviews','products','good',ARRAY['review_text']);
+ERROR:  plpy.Error: jev: predicate name conflicts with a source column
+SELECT create_semantic_predicate('invalid','products','good',ARRAY['missing']);
+ERROR:  plpy.Error: jev: unknown input column
+SELECT create_semantic_predicate('invalid','products','good',ARRAY['review_text'],2);
+ERROR:  plpy.Error: jev: threshold must be between 0 and 1
+CREATE TABLE no_key (id int, txt text);
+SELECT create_semantic_predicate('invalid','no_key','good',ARRAY['txt']);
+ERROR:  plpy.Error: jev: semantic sources need a single smallint, integer or bigint primary key
+DROP TABLE no_key;
+ALTER TABLE products RENAME COLUMN review_text TO renamed;
+ERROR:  jev: drop semantic predicates before changing source structure or tracking
+ALTER TABLE products ENABLE ROW LEVEL SECURITY;
+ERROR:  jev: drop semantic predicates before changing source structure or tracking
+ALTER TABLE products DISABLE TRIGGER jev_semantic_rows;
+ERROR:  jev: drop semantic predicates before changing source structure or tracking
+DROP TABLE products CASCADE;
+NOTICE:  drop cascades to 7 other objects
+ERROR:  jev: drop semantic predicates before dropping their source table
+BEGIN ISOLATION LEVEL REPEATABLE READ;
+SELECT * FROM positive_again;
+ERROR:  jev: semantic views require a writable READ COMMITTED transaction
+ROLLBACK;
+BEGIN READ ONLY;
+SELECT * FROM positive_again;
+ERROR:  jev: semantic views require a writable READ COMMITTED transaction
+ROLLBACK;
+-- Ordinary readers need explicit source access; private state is not exposed.
+CREATE ROLE semantic_reader;
+GRANT SELECT ON positive_again TO semantic_reader;
+SET ROLE semantic_reader;
+SELECT count(*) FROM positive_again;
+ERROR:  jev: semantic view readers need SELECT on the source table
+RESET ROLE;
+GRANT SELECT ON products TO semantic_reader;
+SET ROLE semantic_reader;
+SELECT count(*) FROM positive_again;
+ count 
+-------
+     3
+(1 row)
+
+SELECT * FROM jev_semantic.results;
+ERROR:  permission denied for schema jev_semantic at character 15
+SELECT create_semantic_view('unauthorized','products','positive');
+ERROR:  permission denied for function create_semantic_view
+RESET ROLE;
+REVOKE ALL ON products,positive_again FROM semantic_reader;
+DROP ROLE semantic_reader;
+SELECT drop_semantic_predicate('positive','products');
+ERROR:  plpy.Error: jev: drop dependent semantic views before dropping the predicate
+SELECT drop_semantic_view('popular_positive');
+ drop_semantic_view 
+--------------------
+ 
+(1 row)
+
+SELECT drop_semantic_view('positive_again');
+ drop_semantic_view 
+--------------------
+ 
+(1 row)
+
+SELECT drop_semantic_view('complex_products');
+ drop_semantic_view 
+--------------------
+ 
+(1 row)
+
+SELECT drop_semantic_view('or_skip');
+ drop_semantic_view 
+--------------------
+ 
+(1 row)
+
+SELECT drop_semantic_view('and_skip');
+ drop_semantic_view 
+--------------------
+ 
+(1 row)
+
+SELECT drop_semantic_view('null_logic');
+ drop_semantic_view 
+--------------------
+ 
+(1 row)
+
+SELECT drop_semantic_view('fails');
+ drop_semantic_view 
+--------------------
+ 
+(1 row)
+
+TRUNCATE products;
+SELECT count(*) AS truncated_results FROM jev_semantic.results;
+ truncated_results 
+-------------------
+                 0
+(1 row)
+
+SELECT drop_semantic_predicate('positive','products');
+ drop_semantic_predicate 
+-------------------------
+ 
+(1 row)
+
+SELECT drop_semantic_predicate('green','products');
+ drop_semantic_predicate 
+-------------------------
+ 
+(1 row)
+
+SELECT drop_semantic_predicate('broken','products');
+ drop_semantic_predicate 
+-------------------------
+ 
+(1 row)
+
+DROP TABLE products;
